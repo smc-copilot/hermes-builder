@@ -1,0 +1,8 @@
+.work/
+src/
+payload/
+dist/
+installer/bin/
+installer/obj/
+*.msi
+*.wixpdb

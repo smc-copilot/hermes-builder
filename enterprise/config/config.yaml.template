@@ -1,0 +1,63 @@
+# SMC Copilot Hermes default config
+# This file is copied only on first install. Existing user config is preserved.
+
+# model:
+#   provider: custom
+#   name: your-model
+
+
+mcp_servers:
+
+  obsidian_fs:
+    command: "cmd.exe"
+    args:
+      - "/c"
+      - "npx"
+      - "-y"
+      - "@modelcontextprotocol/server-filesystem"
+      - "D:/obsidian-vault/workspace"
+
+
+plugins:
+  enabled:
+    - nodeskclaw-knowledge
+    - output_artifacts
+  disabled: []
+  entries:
+    output_artifacts:
+      allow_tool_override: false
+    nodeskclaw-knowledge:
+      allow_tool_override: false
+
+known_plugin_toolsets:
+  cli:
+    - nodeskclaw-knowledge
+    - spotify
+
+platforms:
+  api_server:
+    enabled: true
+    extra:
+      port: 8642
+      host: 127.0.0.1
+platform_toolsets:
+  cli:
+    - file
+    - nodeskclaw-knowledge
+    - terminal
+  api:
+    - web
+    - file
+    - skills
+    - session_search
+    - todo
+    - clarify
+    - terminal
+  gateway:
+    - web
+    - file
+    - skills
+    - session_search
+    - todo
+    - clarify
+    - terminal

@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "product": {
+    "name": "SMC Copilot Hermes",
+    "manufacturer": "SMC",
+    "version": "0.21.0",
+    "upgradeCode": "7F5E14D8-61A1-48D3-9EA5-503A84C61F6F"
+  },
+  "source": {
+    "mode": "local-preferred",
+    "localPath": "src/hermes-agent",
+    "repository": "https://github.com/loudon84/copilot-hermes.git",
+    "ref": "041b6985a00d01b54f830c1607dd370007a306bf",
+    "expectedVersion": "0.21.0",
+    "defaultBranch": "main",
+    "originUrls": {
+      "https": "https://github.com/loudon84/copilot-hermes.git",
+      "ssh": "git@github.com:loudon84/copilot-hermes.git"
+    }
+  },
+  "target": {
+    "architecture": "x64",
+    "installRoot": "%LOCALAPPDATA%\\hermes",
+    "perUser": true,
+    "includeDesktop": false,
+    "includePlatformSdks": false
+  },
+  "python": {
+    "version": "3.11",
+    "extras": [
+      "messaging",
+      "mcp",
+      "web",
+      "google",
+      "voice",
+      "edge-tts",
+      "hindsight"
+    ]
+  },
+  "systemTools": {
+    "ripgrep": {
+      "enabled": true,
+      "releaseApi": "https://api.github.com/repos/BurntSushi/ripgrep/releases/latest",
+      "assetRegex": "ripgrep-.*-x86_64-pc-windows-msvc\\.zip$"
+    },
+    "ffmpeg": {
+      "enabled": true,
+      "url": "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+    }
+  },
+  "build": {
+    "configuration": "Release",
+    "workDir": ".work",
+    "distDir": "dist",
+    "keepWorkDir": false
+  }
+}

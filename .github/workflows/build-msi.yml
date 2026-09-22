@@ -1,0 +1,46 @@
+name: build-windows-msi
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: 'Hermes source ref (prefer immutable SHA)'
+        required: false
+        default: '041b6985a00d01b54f830c1607dd370007a306bf'
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Static project validation
+        shell: pwsh
+        run: python tests/validate_project.py
+
+      - name: Enterprise content tests
+        shell: pwsh
+        run: .\tests\Test-EnterpriseContent.ps1
+
+      - name: Windows launcher tests
+        shell: pwsh
+        run: python -B tests/test_launcher.py
+
+      - name: Build MSI
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: .\build\Build.ps1 -SourceRef '${{ inputs.source_ref }}'
+
+      - name: Upload MSI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: copilot-hermes-enterprise-msi
+          path: dist/*
+          if-no-files-found: error
