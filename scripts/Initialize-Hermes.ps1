@@ -7,6 +7,10 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
+# MSI directory properties end with '\'; QuietExec passes "[HermesRoot]." — normalize.
+$HermesHome = [IO.Path]::GetFullPath(($HermesHome.Trim().Trim('"').Trim("'")))
+$HermesHome = $HermesHome.TrimEnd('\')
+
 function Add-UserPathEntry {
     param([Parameter(Mandatory)][string]$Entry)
     $current = [Environment]::GetEnvironmentVariable('Path', 'User')
@@ -25,9 +29,17 @@ function Copy-IfMissing {
     }
 }
 
+$logsDir = Join-Path $HermesHome 'logs'
+$installLog = Join-Path $logsDir 'install.log'
 $initLog = Join-Path $env:TEMP 'hermes-msi-initialize.log'
+New-Item -ItemType Directory -Path $logsDir -Force | Out-Null
+function Write-InstallLog([string]$Message) {
+    $line = '{0} [initialize] {1}' -f (Get-Date -Format 'o'), $Message
+    Add-Content -LiteralPath $installLog -Value $line -Encoding UTF8 -ErrorAction SilentlyContinue
+    Write-Host $line
+}
 try { Start-Transcript -Path $initLog -Force | Out-Null } catch { }
-Write-Host "Initializing Hermes at $HermesHome (log: $initLog)"
+Write-InstallLog "Initializing Hermes at $HermesHome (transcript: $initLog, install.log: $installLog)"
 $agent = Join-Path $HermesHome 'hermes-agent'
 $offline = Join-Path $HermesHome 'offline'
 $settingsPath = Join-Path $offline 'bundle-settings.json'
@@ -51,6 +63,7 @@ $pythonExe = if ($settings.pythonExecutable) {
     Get-ChildItem (Join-Path $HermesHome 'python') -Recurse -Filter 'python.exe' -File -ErrorAction SilentlyContinue | Sort-Object { $_.FullName.Length } | Select-Object -First 1 | ForEach-Object { $_.FullName }
 }
 if (-not $pythonExe -or -not (Test-Path $pythonExe)) { throw "Packaged Python executable not found: $pythonExe" }
+Write-InstallLog "Using Python: $pythonExe"
 
 [Environment]::SetEnvironmentVariable('HERMES_HOME', $HermesHome, 'User')
 $gitBash = Join-Path $HermesHome 'git\bin\bash.exe'
@@ -70,7 +83,7 @@ if (-not $needsSync -and (Test-Path $marker)) {
 }
 
 if ($needsSync) {
-    Write-Host 'Creating/updating Python venv from packaged uv cache (offline, locked)...'
+    Write-InstallLog 'Creating/updating Python venv from packaged uv cache (offline, locked)...'
     $args = @('sync', '--offline', '--locked', '--python', $pythonExe)
     foreach ($extra in $settings.extras) { $args += @('--extra', [string]$extra) }
     Push-Location $agent
@@ -102,7 +115,7 @@ if ((Test-Path $nodeExe) -and (Test-Path $installScript)) {
         $env:npm_config_offline = 'true'
         $env:npm_config_prefer_offline = 'true'
         $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $HermesHome ([string]$settings.playwrightBrowsersPath)
-        Write-Host 'Installing Node dependencies from packaged npm cache (offline)...'
+        Write-InstallLog 'Installing Node dependencies from packaged npm cache (offline)...'
         & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $installScript `
             -HermesHome $HermesHome -InstallDir $agent -Stage 'node-deps' -NonInteractive -SkipSetup
         if ($LASTEXITCODE -ne 0) { throw "Offline node-deps initialization failed with $LASTEXITCODE" }
@@ -134,5 +147,6 @@ $markerData | ConvertTo-Json | Set-Content -LiteralPath $marker -Encoding UTF8
 
 $hermesExe = Join-Path $venv 'Scripts\hermes.exe'
 if (-not (Test-Path $hermesExe)) { throw "Hermes executable missing after offline sync: $hermesExe" }
-Write-Host 'Hermes initialization complete.'
+Write-InstallLog "Hermes executable OK: $hermesExe"
+Write-InstallLog 'Hermes initialization complete.'
 try { Stop-Transcript | Out-Null } catch { }

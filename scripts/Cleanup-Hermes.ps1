@@ -5,6 +5,9 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Continue'
 
+$HermesHome = [IO.Path]::GetFullPath(($HermesHome.Trim().Trim('"').Trim("'")))
+$HermesHome = $HermesHome.TrimEnd('\')
+
 # Generated runtime only. User state is intentionally preserved.
 $venv = Join-Path $HermesHome 'hermes-agent\venv'
 if (Test-Path $venv) { Remove-Item $venv -Recurse -Force -ErrorAction SilentlyContinue }
