@@ -26,6 +26,6 @@ Copy-Item (Join-Path $ProjectRoot 'enterprise\launchers\hermes.cmd') (Join-Path 
 
 $bootstrap = Join-Path $PayloadDir 'bootstrap'
 Ensure-Directory $bootstrap
-foreach ($name in @('Preflight-HermesInstall.ps1', 'Initialize-Hermes.ps1', 'Install-EnterpriseSkills.ps1', 'Cleanup-Hermes.ps1', 'Repair-Hermes.ps1', 'Verify-Installation.ps1')) {
+foreach ($name in @('Install-EnterpriseSkills.ps1', 'Repair-Hermes.ps1', 'Verify-Installation.ps1')) {
     Copy-Item (Join-Path $ProjectRoot "scripts\$name") (Join-Path $bootstrap $name) -Force
 }

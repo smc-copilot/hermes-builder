@@ -8,6 +8,7 @@ param(
 . (Join-Path $PSScriptRoot 'Common.ps1')
 
 $script:OfflineProofSteps = @()
+$script:VenvEstimatedBytes = [int64]0
 function Add-OfflineProofStep {
     param(
         [Parameter(Mandatory)][string]$Name,
@@ -104,6 +105,7 @@ try {
     $venvPython = Join-Path $venv 'Scripts\python.exe'
     Invoke-Native $venvPython @('-c', 'import yaml, openai') $AgentDir
     Add-OfflineProofStep 'core-imports' "$venvPython -c import yaml, openai" 0
+    $script:VenvEstimatedBytes = [int64](@(Get-ChildItem -LiteralPath $venv -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum)
 } finally {
     if (Test-Path $venv) { Remove-Item $venv -Recurse -Force }
     $env:UV_CACHE_DIR = $oldCache
@@ -210,7 +212,11 @@ $settings = [ordered]@{
 }
 Write-JsonFile $settings (Join-Path $offline 'bundle-settings.json')
 
+if (-not $script:VenvEstimatedBytes -or [int64]$script:VenvEstimatedBytes -le 0) {
+    throw 'BUNDLE_INCOMPLETE: venvEstimatedBytes must be > 0'
+}
 Write-Output ([pscustomobject]@{
     schemaVersion = 1
     steps = @($script:OfflineProofSteps)
+    venvEstimatedBytes = [int64]$script:VenvEstimatedBytes
 })

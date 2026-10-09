@@ -1,0 +1,22 @@
+[workspace]
+
+[package]
+name = "hermes-setup"
+version = "2.0.0"
+edition = "2021"
+description = "Hermes Setup 2.0.0 offline installer UI"
+
+[lib]
+name = "hermes_setup"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+installer-core = { path = "../../installer-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tauri = { version = "2", features = [] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }

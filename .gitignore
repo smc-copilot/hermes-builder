@@ -1,5 +1,9 @@
 .work/
-src/
+target/
+installer-ui/src-tauri/target/
+target/
+installer-ui/src-tauri/target/
+/src/
 payload/
 dist/
 installer/bin/

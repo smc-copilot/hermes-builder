@@ -20,9 +20,35 @@ function Assert-Windows {
     }
 }
 
+function Add-MsiOverlay {
+    param(
+        [Parameter(Mandatory)][string]$SetupPath,
+        [Parameter(Mandatory)][string]$MsiPath
+    )
+    $msiLength = [int64](Get-Item -LiteralPath $MsiPath).Length
+    if ($msiLength -le 0) { throw 'BUNDLE_INCOMPLETE: Core MSI is empty' }
+    $output = [IO.File]::Open($SetupPath, [IO.FileMode]::Append, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    $source = [IO.File]::Open($MsiPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    try {
+        $source.CopyTo($output)
+        $output.Write([BitConverter]::GetBytes($msiLength), 0, 8)
+        $output.Write([Text.Encoding]::ASCII.GetBytes('HERMESM1'), 0, 8)
+        $output.Flush()
+    } finally {
+        $source.Dispose()
+        $output.Dispose()
+    }
+}
+
 function Reset-Directory {
     param([Parameter(Mandatory)][string]$Path)
-    if (Test-Path $Path) { Remove-Item -LiteralPath $Path -Recurse -Force }
+    if (Test-Path $Path) {
+        try {
+            Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+        } catch {
+            Get-ChildItem -LiteralPath $Path -Force | Remove-Item -Recurse -Force -ErrorAction Stop
+        }
+    }
     New-Item -ItemType Directory -Path $Path -Force | Out-Null
 }
 

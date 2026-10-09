@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>Hermes Setup 2.0.0</title>
+  <style>
+    body { font-family: Segoe UI, sans-serif; margin: 24px; color: #1b1b1b; }
+    button { margin-right: 8px; padding: 8px 12px; }
+    #stage { font-weight: 600; }
+    pre { white-space: pre-wrap; background: #f4f4f4; padding: 12px; }
+  </style>
+</head>
+<body>
+  <h1>Hermes Setup</h1>
+  <p>Installer 2.0.0 · Agent 0.21.0 · 无 Authenticode 要求</p>
+  <ol>
+    <li>Preflight</li>
+    <li>Install Payload</li>
+    <li>Initialize Python</li>
+    <li>Verify CLI</li>
+    <li>Complete</li>
+  </ol>
+  <p id="stage">等待操作</p>
+  <button id="go">开始安装</button>
+  <button id="retry">重试</button>
+  <button id="rebuild">重建运行时</button>
+  <pre id="log"></pre>
+  <script>
+    const log = document.getElementById('log');
+    const stage = document.getElementById('stage');
+    async function call(name) {
+      const value = await window.__TAURI__.core.invoke(name);
+      log.textContent = value;
+      const body = JSON.parse(value);
+      stage.textContent = body.ok ? (body.stage || 'COMPLETED') : (body.errorCode + ' ' + (body.operationId || ''));
+      return body;
+    }
+    document.getElementById('go').onclick = async () => {
+      const pre = await call('preflight');
+      if (!pre.ok) return;
+      const msi = await call('install_payload');
+      if (!msi.ok) return;
+      await call('initialize_runtime');
+    };
+    document.getElementById('retry').onclick = () => call('initialize_runtime');
+    document.getElementById('rebuild').onclick = () => call('repair_runtime');
+  </script>
+</body>
+</html>

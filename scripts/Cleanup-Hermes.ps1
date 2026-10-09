@@ -1,8 +1,14 @@
 param(
-    [string]$HermesHome = $(if ($env:HERMES_HOME) { $env:HERMES_HOME } else { "$env:LOCALAPPDATA\hermes" })
+    [string]$HermesHome = $(if ($env:HERMES_HOME) { $env:HERMES_HOME } else { "$env:LOCALAPPDATA\hermes" }),
+    [switch]$LegacyV1Cleanup
 )
 
 Set-StrictMode -Version Latest
+if (-not $LegacyV1Cleanup) {
+    Write-Host 'v2 uninstall does not delete generated runtime, skill ledger, diagnostics, or user state.'
+    exit 0
+}
+
 $ErrorActionPreference = 'Continue'
 
 $HermesHome = [IO.Path]::GetFullPath(($HermesHome.Trim().Trim('"').Trim("'")))

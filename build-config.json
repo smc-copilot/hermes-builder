@@ -3,7 +3,7 @@
   "product": {
     "name": "SMC Copilot Hermes",
     "manufacturer": "SMC",
-    "version": "0.21.0",
+    "version": "2.0.0",
     "upgradeCode": "7F5E14D8-61A1-48D3-9EA5-503A84C61F6F"
   },
   "source": {
@@ -53,6 +53,13 @@
     "workDir": ".work",
     "distDir": "dist",
     "keepWorkDir": false
+  },
+  "identity": {
+    "installerVersion": "2.0.0",
+    "agentVersion": "0.21.0",
+    "autoUpdateAgent": false,
+    "authenticodeRequired": false,
+    "manifestKeyId": "e6199f4b558ab9c4"
   },
   "offlinePolicy": {
     "core": "CORE_NO_NETWORK_V1",

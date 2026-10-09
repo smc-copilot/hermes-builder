@@ -50,47 +50,116 @@ try {
         }
     }
     & (Join-Path $PSScriptRoot 'Prepare-EnterpriseContent.ps1') -Config $config -ProjectRoot $projectRoot -PayloadDir $payloadDir -AgentDir $source.AgentDir
-    & (Join-Path $PSScriptRoot 'Generate-Manifest.ps1') -Config $config -PayloadDir $payloadDir -SourceCommit $source.Commit -SourceRef $source.Ref
+
+    $installerVersion = [string]$config.identity.installerVersion
+    $agentVersion = [string]$config.identity.agentVersion
+    if ($installerVersion -ne '2.0.0' -or $agentVersion -ne '0.21.0') { throw 'AGENT_VERSION_CHANGE_DENIED' }
+    if ([string]$config.product.version -ne $installerVersion) { throw 'AGENT_VERSION_CHANGE_DENIED' }
+    if ([string]$config.source.repository -match 'smc-copilot/hermes-agent') { throw 'AGENT_VERSION_CHANGE_DENIED' }
+
+    Write-Step 'Compile HermesRuntimeInit.exe before the payload tree is frozen'
+    $cargo = Join-Path $env:USERPROFILE '.cargo\bin\cargo.exe'
+    if (-not (Test-Path -LiteralPath $cargo)) { throw 'BUNDLE_INCOMPLETE: cargo is not installed' }
+    Invoke-Native $cargo @('build', '-p', 'installer-cli', '--release') $projectRoot
+    $initExe = Join-Path $projectRoot 'target\release\HermesRuntimeInit.exe'
+    if (-not (Test-Path -LiteralPath $initExe)) { throw 'BUNDLE_INCOMPLETE: HermesRuntimeInit.exe was not produced' }
+    $bootstrapDir = Join-Path $payloadDir 'bootstrap'
+    New-Item -ItemType Directory -Path $bootstrapDir -Force | Out-Null
+    Copy-Item -LiteralPath $initExe -Destination (Join-Path $bootstrapDir 'HermesRuntimeInit.exe') -Force
+
+    $venvEstimated = [int64]$offlineProof.venvEstimatedBytes
+    & (Join-Path $PSScriptRoot 'Generate-Manifest.ps1') -Config $config -PayloadDir $payloadDir -SourceCommit $source.Commit -SourceRef $source.Ref -VenvEstimatedBytes $venvEstimated
 
     if (-not $SkipMsi) {
-        Write-Step 'Build single per-user MSI with WiX Toolset 5'
+        Write-Step 'Build single per-user Files-Only MSI with WiX Toolset 5'
         $wixProject = Join-Path $projectRoot 'installer\HermesEnterprise.Setup.wixproj'
         $payloadEscaped = $payloadDir
-        $version = [string]$config.product.version
         Invoke-Native 'dotnet' @(
             'build', $wixProject,
             '-c', [string]$config.build.configuration,
-            "-p:ProductVersion=$version",
+            "-p:ProductVersion=$installerVersion",
             "-p:PayloadDir=$payloadEscaped"
         ) $projectRoot
 
         $msi = Get-ChildItem (Join-Path $projectRoot 'installer\bin') -Recurse -Filter '*.msi' |
             Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
         if (-not $msi) { throw 'WiX build completed but no MSI was found under installer/bin.' }
-        $finalName = "copilot-hermes-enterprise-$version-win-x64.msi"
+        $finalName = "Hermes-Core-$installerVersion-win-x64.msi"
         $finalMsi = Join-Path $distDir $finalName
         Copy-Item $msi.FullName $finalMsi -Force
         $sha = Get-Sha256 $finalMsi
         "$sha  $finalName" | Set-Content -LiteralPath "$finalMsi.sha256" -Encoding ASCII
 
+        $runtimeManifestPath = Join-Path $payloadDir 'runtime-manifest-v2.json'
+        $runtimeManifest = Get-Content -LiteralPath $runtimeManifestPath -Raw | ConvertFrom-Json
+        if ([int64]$runtimeManifest.uncompressedPayloadBytes -le 0 -or [int64]$runtimeManifest.venvEstimatedBytes -le 0) {
+            throw 'BUNDLE_INCOMPLETE: manifest sizes must be > 0'
+        }
+        $release = [ordered]@{
+            schemaVersion = 2
+            installerVersion = $installerVersion
+            msiProductVersion = $installerVersion
+            msiUpgradeCode = [string]$config.product.upgradeCode
+            msiSha256 = $sha
+            source = [ordered]@{
+                repository = [string]$source.Repository
+                commit = [string]$source.Commit
+                agentVersion = $agentVersion
+            }
+            runtime = [ordered]@{
+                pythonVersion = [string]$config.python.version
+                architecture = 'x64'
+                offline = $true
+                payloadTreeSha256 = [string]$runtimeManifest.payloadTreeSha256
+                uncompressedPayloadBytes = [int64]$runtimeManifest.uncompressedPayloadBytes
+                venvEstimatedBytes = [int64]$runtimeManifest.venvEstimatedBytes
+            }
+            policy = [ordered]@{
+                autoUpdateAgent = $false
+                requiresInteractiveUser = $true
+            }
+        }
+        $releasePath = Join-Path $distDir 'release-manifest-v2.json'
+        Write-JsonFile $release $releasePath
+
+        Write-Step 'Compile Hermes-Setup.exe with the Core MSI embedded'
+        $env:HERMES_RELEASE_MANIFEST = $releasePath
+        Invoke-Native $cargo @('build', '--release', '--manifest-path', (Join-Path $projectRoot 'installer-ui\src-tauri\Cargo.toml')) $projectRoot
+        $setupBuilt = Join-Path $projectRoot 'installer-ui\src-tauri\target\release\hermes-setup.exe'
+        if (-not (Test-Path -LiteralPath $setupBuilt)) { throw 'BUNDLE_INCOMPLETE: Hermes-Setup.exe was not produced' }
+        $setupName = "Hermes-Setup-$installerVersion-win-x64.exe"
+        $setupFinal = Join-Path $distDir $setupName
+        Copy-Item -LiteralPath $setupBuilt -Destination $setupFinal -Force
+        Add-MsiOverlay -SetupPath $setupFinal -MsiPath $finalMsi
+        $setupSha = Get-Sha256 $setupFinal
+        "$setupSha  $setupName" | Set-Content -LiteralPath "$setupFinal.sha256" -Encoding ASCII
+
         $buildInfo = [ordered]@{
-            schemaVersion = 1
-            productVersion = $version
+            schemaVersion = 2
+            installerVersion = $installerVersion
+            productVersion = $installerVersion
+            agentVersion = $agentVersion
             hermesVersion = $source.Version
             sourceRepository = $source.Repository
             sourceRef = $source.Ref
             sourceCommit = $source.Commit
             architecture = 'x64'
             installScope = 'per-user'
+            authenticodeRequired = $false
             msi = $finalName
             sha256 = $sha
+            setup = $setupName
+            setupSha256 = $setupSha
             unreleasable = [bool]$source.Unreleasable
             offlineProof = $offlineProof
+            venvEstimatedBytes = [int64]$runtimeManifest.venvEstimatedBytes
+            uncompressedPayloadBytes = [int64]$runtimeManifest.uncompressedPayloadBytes
             builtAtUtc = [DateTime]::UtcNow.ToString('o')
         }
         Write-JsonFile $buildInfo (Join-Path $distDir 'build-info.json')
         Write-Host "`nMSI: $finalMsi" -ForegroundColor Green
         Write-Host "SHA256: $sha" -ForegroundColor Green
+        Write-Host "Setup: $setupFinal" -ForegroundColor Green
     } else {
         Write-Host "Payload prepared at: $payloadDir" -ForegroundColor Green
     }

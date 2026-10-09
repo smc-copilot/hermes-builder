@@ -7,6 +7,11 @@ on:
         description: 'Hermes source ref (prefer immutable SHA)'
         required: false
         default: '041b6985a00d01b54f830c1607dd370007a306bf'
+      run_golden:
+        description: 'Run the Win10 release gate. windows-2022 cannot satisfy it.'
+        type: boolean
+        required: false
+        default: false
 
 jobs:
   build:
@@ -40,10 +45,18 @@ jobs:
         shell: pwsh
         run: .\tests\Test-PythonOfflineInstall.ps1
 
+      - name: v2 static gates
+        shell: pwsh
+        run: |
+          .\tests\v2\TEST-A-SRC-001.ps1
+          .\tests\v2\TEST-A-MSI-001.ps1
+          .\tests\v2\TEST-A-BUILD-002.ps1
+
       - name: Build MSI
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HERMES_MANIFEST_ED25519_SEED_B64: ${{ secrets.HERMES_MANIFEST_ED25519_SEED_B64 }}
         run: .\build\Build.ps1 -SourceRef '${{ inputs.source_ref }}'
 
       - name: Build-gate proof
@@ -60,8 +73,17 @@ jobs:
       - name: Upload MSI artifact
         uses: actions/upload-artifact@v4
         with:
-          name: copilot-hermes-enterprise-msi
+          name: hermes-enterprise-installer-v2
           path: |
             dist/*
             evidence/*
           if-no-files-found: error
+
+  golden:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_golden == true }}
+    runs-on: [self-hosted, windows-10]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Release gate
+        shell: pwsh
+        run: .\tests\release\Evaluate-ReleaseGate.ps1

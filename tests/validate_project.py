@@ -44,6 +44,12 @@ if cfg["source"].get("defaultBranch") != "main":
     fail("local source checkout must use the main branch")
 if cfg["source"]["repository"] != "https://github.com/loudon84/copilot-hermes.git":
     fail("unexpected source repository")
+if cfg["product"]["version"] != "2.0.0":
+    fail("installer ProductVersion must be 2.0.0")
+if cfg["identity"]["installerVersion"] != "2.0.0" or cfg["identity"]["agentVersion"] != "0.21.0":
+    fail("installer and agent versions must stay split")
+if cfg["identity"]["autoUpdateAgent"] is not False or cfg["identity"]["authenticodeRequired"] is not False:
+    fail("v2 must not auto-update Agent or require Authenticode")
 if cfg["source"]["expectedVersion"] != "0.21.0":
     fail("expected Hermes version must be 0.21.0")
 if not re.fullmatch(r"[0-9a-f]{40}", cfg["source"]["ref"]):
@@ -57,19 +63,23 @@ wix = ROOT / "installer/Package.wxs"
 ET.parse(wix)
 wix_text = wix.read_text(encoding="utf-8")
 wixproj_text = (ROOT / "installer/HermesEnterprise.Setup.wixproj").read_text(encoding="utf-8")
-if "WixToolset.Sdk/5.0.2" not in wixproj_text or "WixToolset.Util.wixext\" Version=\"5.0.2\"" not in wixproj_text:
+if "WixToolset.Sdk/5.0.2" not in wixproj_text:
     fail("WiX project must use the WiX 5 SDK for Files harvesting")
+if "Hermes-Core-$(ProductVersion)-win-x64" not in wixproj_text:
+    fail("MSI output must be Hermes-Core-<installerVersion>")
 if "<SuppressIces>ICE38;ICE64</SuppressIces>" not in wixproj_text:
     fail("WiX per-user project must explicitly suppress only ICE38 and ICE64")
 for expected in [
     'Scope="perUser"',
     'Id="LocalAppDataFolder"',
-    'Id="InitializeHermes"',
-    'Wix4UtilCA_X64',
     'Include="$(var.PayloadDir)\\**"',
+    'NOT UserSID = &quot;S-1-5-18&quot;',
 ]:
     if expected not in wix_text:
         fail(f"WiX authoring missing: {expected}")
+for forbidden in ["InitializeHermes", "PreflightHermes", "CleanupHermes", "WixQuietExec"]:
+    if forbidden in wix_text:
+        fail(f"Files-only MSI must not contain {forbidden}")
 
 build_text = (ROOT / "build/Build.ps1").read_text(encoding="utf-8")
 if "Prepare-Source.ps1" not in build_text or "dotnet" not in build_text:
@@ -139,22 +149,32 @@ if re.search(r"(?<![A-Za-z])iwr(?![A-Za-z])", init_text, re.IGNORECASE):
 if re.search(r"(?<![A-Za-z])irm(?![A-Za-z])", init_text, re.IGNORECASE):
     fail("initializer must not reference irm")
 
-manifest_text = (ROOT / "build/Generate-Manifest.ps1").read_text(encoding="utf-8")
+manifest_text = (ROOT / "build/runtime_manifest_v2.py").read_text(encoding="utf-8")
 expected_keys = [
-    "bin\\uv.exe",
-    "bin\\rg.exe",
-    "bin\\ffmpeg.exe",
-    "bin\\ffprobe.exe",
-    "node\\node.exe",
-    "hermes-agent\\pyproject.toml",
-    "hermes-agent\\uv.lock",
-    "offline\\bundle-settings.json",
+    "bin/uv.exe",
+    "bin/rg.exe",
+    "bin/ffmpeg.exe",
+    "bin/ffprobe.exe",
+    "node/node.exe",
+    "hermes-agent/pyproject.toml",
+    "hermes-agent/uv.lock",
+    "offline/bundle-settings.json",
 ]
 for key in expected_keys:
     if key not in manifest_text:
-        fail(f"Generate-Manifest.ps1 missing key file {key}")
+        fail(f"runtime manifest missing key file {key}")
 if "BUILD_PROVENANCE_MISSING" not in manifest_text:
-    fail("Generate-Manifest.ps1 must fail the build when a key file is missing")
+    fail("runtime manifest must fail the build when a key file is missing")
+if "HERMES_MANIFEST_ED25519_SEED_B64" not in manifest_text or "e6199f4b558ab9c4" not in manifest_text:
+    fail("runtime manifest must require the Ed25519 seed and pinned keyId")
+stage_text = (ROOT / "build/Prepare-EnterpriseContent.ps1").read_text(encoding="utf-8")
+if "Initialize-Hermes.ps1" in stage_text or "Preflight-HermesInstall.ps1" in stage_text:
+    fail("payload staging must not copy v1 init/preflight scripts")
+workflow = (ROOT / ".github/workflows/build-msi.yml").read_text(encoding="utf-8")
+if "HERMES_MANIFEST_ED25519_SEED_B64" not in workflow:
+    fail("workflow must consume the manifest seed secret")
+if "signtool" in workflow.lower():
+    fail("workflow must not require Authenticode")
 if re.search(r"if\s*\(\s*Test-Path\s+\$full\s*\)\s*\{\s*\$hashes", manifest_text):
     fail("Generate-Manifest.ps1 must not skip missing key files")
 
@@ -180,6 +200,8 @@ for p in ROOT.rglob("*"):
     if not p.is_file() or p.suffix.lower() in {".png", ".jpg", ".zip"}:
         continue
     if local_source in p.parents:
+        continue
+    if any(part in {"target", "payload", "dist", ".git", ".work"} for part in p.parts):
         continue
     if p == env_template:
         continue

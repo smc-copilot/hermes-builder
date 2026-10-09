@@ -1,13 +1,14 @@
-# Copilot Hermes v0.21.0 Windows MSI 打包工程（本地源码优先）
+# Hermes Enterprise Installer 2.0.0（Agent 0.21.0 锁定）
 
-本工程用于把 `loudon84/copilot-hermes` 的 Hermes Agent v0.21.0 制作为 **Windows x64、当前用户范围、默认安装到 `%LOCALAPPDATA%\hermes` 的单一 MSI**。
+本工程把 `loudon84/copilot-hermes` 的 Hermes Agent **0.21.0** 打成 Windows x64、当前用户范围、默认安装到 `%LOCALAPPDATA%\hermes` 的安装包。Installer ProductVersion 是 **2.0.0**，不等于 Agent 版本。MSI 只提交程序文件；`HermesRuntimeInit.exe` 在 MSI 提交之后离线初始化。初始化失败不回滚已提交的 MSI。本轮不要求 Authenticode。
 
 构建方案采用本地源码优先。正式构建要求 `src/hermes-agent` 的 HEAD 等于 `build-config.json` 里钉死的 40 位 `source.ref`，并且工作树和子模块干净，不会再 `git pull`。`-DevelopmentMode` 才保留旧的 `main` + `git pull --ff-only`，产物在 `build-info.json` 里标 `unreleasable`。本地源码不存在时，从配置的远程仓库 clone 并 checkout 该 SHA。只有构建机可以联网。终端 Core 安装不调用上游 `install.ps1`，也不跑 `node` / `npm` / `npx`。
 
 ## 1. 默认锁定基线
 
 - Repository: `https://github.com/loudon84/copilot-hermes.git`
-- Hermes: `0.21.0`
+- Installer: `2.0.0`
+- Hermes Agent: `0.21.0`（不随安装器升级）
 - Fallback source ref: `041b6985a00d01b54f830c1607dd370007a306bf`
 - Target: Windows x64
 - Install scope: per-user
@@ -90,42 +91,17 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 ```text
 dist/
-  copilot-hermes-enterprise-0.21.0-win-x64.msi
-  copilot-hermes-enterprise-0.21.0-win-x64.msi.sha256
+  Hermes-Setup-2.0.0-win-x64.exe
+  Hermes-Core-2.0.0-win-x64.msi
+  release-manifest-v2.json
   build-info.json
 ```
 
 ## 6. 客户端安装
 
-交互安装：
+终端用户双击 `Hermes-Setup-2.0.0-win-x64.exe`。企业在交互用户会话里分两步，日志目录必须是新的 UUID，不要用固定文件名。`msiexec` 返回 3010 时不要调用 Init。操作说明见 `docs/runbooks/hermes-installer-v2.md`。
 
-```powershell
-msiexec /i .\copilot-hermes-enterprise-0.21.0-win-x64.msi
-```
-
-静默安装：
-
-```powershell
-msiexec /i .\copilot-hermes-enterprise-0.21.0-win-x64.msi /qn /norestart /l*v hermes-install.log
-```
-
-MSI 安装结束前会执行本地初始化：
-
-1. 设置当前用户 `HERMES_HOME=%LOCALAPPDATA%\hermes`
-2. 把 `%LOCALAPPDATA%\hermes\bin` 加入当前用户 PATH
-3. 使用 MSI 内的 uv + Python + uv cache
-4. Preflight 核对 `runtime-manifest.json` 里 8 个路径的 SHA256，不一致则 `BUNDLE_INTEGRITY_FAILED`，不会启动 uv
-5. 在真实用户路径创建 `hermes-agent\venv`
-6. `uv sync --offline --frozen --no-progress`（allowlist 环境，不调用上游 `install.ps1`，不跑 node/npm），然后 `import yaml, openai`
-7. 校验 `venv\Scripts\hermes.exe --version`，复制到 `bin\hermes.exe` 后再校验一次
-8. 首次 seed `.env` / `config.yaml` / `SOUL.md`，已存在时绝不覆盖
-9. 同步 `enterprise/skills` 到 `%LOCALAPPDATA%\hermes\skills`，目录名转为小写连字符，保留分类路径
-10. 写入 bundle install marker（不写 `COMMITTED`）
-
-失败诊断只看这两个文件，不在 `%LOCALAPPDATA%\hermes` 下：
-
-- `%TEMP%\hermes-msi-preflight.log`
-- `%TEMP%\hermes-msi-initialize.log`
+Direct MSI 成功只表示 `PAYLOAD_INSTALLED`。uv、venv、技能账本和 receipt 由 `%LOCALAPPDATA%\hermes\bootstrap\HermesRuntimeInit.exe` 完成。失败时 payload 保留，诊断在 `%LOCALAPPDATA%\SMC\HermesInstaller\InstallerLogs\<operationId>\`。
 
 ## 7. 安装目录
 

@@ -14,7 +14,10 @@ $checks = [ordered]@{
     offlineCache = Join-Path $HermesHome 'offline\uv-cache'
     hermes = Join-Path $HermesHome 'hermes-agent\venv\Scripts\hermes.exe'
     binHermes = Join-Path $HermesHome 'bin\hermes.exe'
-    runtimeManifest = Join-Path $HermesHome 'runtime-manifest.json'
+    runtimeManifest = Join-Path $HermesHome 'runtime-manifest-v2.json'
+    runtimeSignature = Join-Path $HermesHome 'runtime-manifest-v2.sig'
+    initExe = Join-Path $HermesHome 'bootstrap\HermesRuntimeInit.exe'
+    receipt = Join-Path $HermesHome 'state\runtime-receipt-v2.json'
 }
 
 $failed = @()

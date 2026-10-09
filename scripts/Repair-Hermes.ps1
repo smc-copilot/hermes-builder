@@ -2,7 +2,9 @@ param(
     [string]$HermesHome = $(if ($env:HERMES_HOME) { $env:HERMES_HOME } else { "$env:LOCALAPPDATA\hermes" })
 )
 
-$init = Join-Path $HermesHome 'bootstrap\Initialize-Hermes.ps1'
-if (-not (Test-Path $init)) { throw "Initialize-Hermes.ps1 not found: $init" }
-& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $init -HermesHome $HermesHome -Force
+$ErrorActionPreference = 'Stop'
+$init = Join-Path $HermesHome 'bootstrap\HermesRuntimeInit.exe'
+$manifest = Join-Path $HermesHome 'runtime-manifest-v2.json'
+if (-not (Test-Path -LiteralPath $init)) { throw "HermesRuntimeInit.exe not found: $init" }
+& $init --repair --quiet --manifest $manifest
 exit $LASTEXITCODE
