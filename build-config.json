@@ -53,5 +53,11 @@
     "workDir": ".work",
     "distDir": "dist",
     "keepWorkDir": false
+  },
+  "offlinePolicy": {
+    "core": "CORE_NO_NETWORK_V1",
+    "minFreeBytes": 4294967296,
+    "endpointRunsNode": false,
+    "endpointRunsUpstreamInstall": false
   }
 }

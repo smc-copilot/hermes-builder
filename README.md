@@ -2,7 +2,7 @@
 
 本工程用于把 `loudon84/copilot-hermes` 的 Hermes Agent v0.21.0 制作为 **Windows x64、当前用户范围、默认安装到 `%LOCALAPPDATA%\hermes` 的单一 MSI**。
 
-构建方案采用本地源码优先：如果 `src/hermes-agent` 已经存在，则确认它是 `main` 分支的 Git checkout，执行 `git pull --ff-only` 后复制到 MSI payload；如果本地源码不存在，则从配置的远程仓库 clone，并 checkout 配置的 ref。客户端安装阶段不需要 GitHub / PyPI / npm 下载核心依赖。
+构建方案采用本地源码优先。正式构建要求 `src/hermes-agent` 的 HEAD 等于 `build-config.json` 里钉死的 40 位 `source.ref`，并且工作树和子模块干净，不会再 `git pull`。`-DevelopmentMode` 才保留旧的 `main` + `git pull --ff-only`，产物在 `build-info.json` 里标 `unreleasable`。本地源码不存在时，从配置的远程仓库 clone 并 checkout 该 SHA。只有构建机可以联网。终端 Core 安装不调用上游 `install.ps1`，也不跑 `node` / `npm` / `npx`。
 
 ## 1. 默认锁定基线
 
@@ -12,7 +12,7 @@
 - Target: Windows x64
 - Install scope: per-user
 - Install root: `%LOCALAPPDATA%\hermes`
-- WiX Toolset SDK: 4.0.6
+- WiX Toolset SDK: 5.0.2 (`WixToolset.Sdk/5.0.2`)
 
 所有基线都在 `build-config.json` 中可配置。生产发布建议始终锁定到 commit SHA，不建议把 `main` 直接作为正式 MSI 构建输入。
 
@@ -34,9 +34,9 @@
 - 企业默认配置模板
 - Enterprise Skills / Plugins 注入点
 
-Python venv **不会从构建机直接复制到用户电脑**。原因是 Windows venv 中存在与构建路径绑定的 launcher / interpreter path。MSI 安装后通过本地 uv cache 在最终 `%LOCALAPPDATA%\hermes\hermes-agent\venv` 创建 venv，全过程使用 `--offline --locked`。
+Python venv **不会从构建机直接复制到用户电脑**。原因是 Windows venv 中存在与构建路径绑定的 launcher / interpreter path。构建机在打包前会删掉 venv，用 `uv sync --offline --frozen --no-config` 重建一次并跑 `hermes.exe --version`，再把这个 venv 删掉。`--frozen` 是因为 uv 0.12 不能把 `--locked` 和 `--no-config` 放在一起，而 `--no-config` 会丢掉 `tool.uv` 的 `exclude-newer`，`--locked` 因此会重新解析并在离线 cache 上失败。MSI 安装后，终端在最终 `%LOCALAPPDATA%\hermes\hermes-agent\venv` 用同一组参数再建一次，环境变量只保留 allowlist（清掉继承的 `UV_*` 和 `VIRTUAL_ENV`）。
 
-Node 依赖在构建机先在线安装一次以填充 npm cache，并把 Playwright Chromium 固定下载到 payload；随后删除 `node_modules` 并再执行一次 **npm hard-offline 验证**。客户端安装时在最终用户路径从 MSI 内的 npm cache 本地重建 `node_modules`，避免 npm registry 下载，也避免把构建机路径绑定的 workspace junction 直接复制到另一台电脑。
+Node 依赖只在构建机处理：先在线安装以填充 npm cache，并把 Playwright Chromium 固定下载到 payload，再在 `npm_config_offline=true` 下重建 `node_modules` 证明 cache 够用，然后删除 `node_modules`。终端不重建 `node_modules`。`payload\playwright` 里没有 `chrome.exe` 或 `headless_shell.exe` 时构建失败。这三步的命令、退出码和 UTC 时间写入 `dist/build-info.json` 的 `offlineProof`。任一步失败则构建退出非 0，不产出 MSI。
 
 ## 3. 默认不放进 Core MSI 的两类内容
 
@@ -69,9 +69,10 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 源码准备规则：
 
-1. `src/hermes-agent` 存在时，必须是 `main` 分支的 Git checkout；构建执行 `git pull --ff-only`，然后使用更新后的源码。
-2. `src/hermes-agent` 不存在时，构建从 `build-config.json` 的仓库 clone 到该路径，并 checkout 配置的 ref。
-3. 本地 checkout 不满足 Git、分支或 fast-forward 要求时，构建直接失败，不会静默覆盖本地源码。
+1. 正式构建：`src/hermes-agent` 存在时，HEAD 必须等于钉死的 `source.ref`，工作树和子模块必须干净。不执行 `git pull`。
+2. `src/hermes-agent` 不存在时，构建从 `build-config.json` 的仓库 clone 到该路径，并 checkout 配置的 SHA。
+3. HEAD 不一致报 `SOURCE_REF_MISMATCH`，工作树不干净报 `SOURCE_DIRTY`。不会静默覆盖本地源码。
+4. `-DevelopmentMode` 保留 `main` + `git pull --ff-only`，产物不可发布。
 
 本地源码缺失时临时覆盖 fallback ref：
 
@@ -113,12 +114,18 @@ MSI 安装结束前会执行本地初始化：
 1. 设置当前用户 `HERMES_HOME=%LOCALAPPDATA%\hermes`
 2. 把 `%LOCALAPPDATA%\hermes\bin` 加入当前用户 PATH
 3. 使用 MSI 内的 uv + Python + uv cache
-4. 在真实用户路径创建 `hermes-agent\venv`
-5. `uv sync --offline --locked`
-6. 从 MSI 内 npm cache 离线执行 Hermes `node-deps`，并复用已打包 Playwright Chromium
-7. 首次 seed `.env` / `config.yaml` / `SOUL.md`，已存在时绝不覆盖
-8. 同步 `enterprise/skills` 到 `%LOCALAPPDATA%\hermes\skills`，目录名转为小写连字符，保留分类路径
-9. 写入 bundle install marker
+4. Preflight 核对 `runtime-manifest.json` 里 8 个路径的 SHA256，不一致则 `BUNDLE_INTEGRITY_FAILED`，不会启动 uv
+5. 在真实用户路径创建 `hermes-agent\venv`
+6. `uv sync --offline --frozen --no-config`（allowlist 环境，不调用上游 `install.ps1`，不跑 node/npm）
+7. 校验 `venv\Scripts\hermes.exe --version`，复制到 `bin\hermes.exe` 后再校验一次
+8. 首次 seed `.env` / `config.yaml` / `SOUL.md`，已存在时绝不覆盖
+9. 同步 `enterprise/skills` 到 `%LOCALAPPDATA%\hermes\skills`，目录名转为小写连字符，保留分类路径
+10. 写入 bundle install marker（不写 `COMMITTED`）
+
+失败诊断只看这两个文件，不在 `%LOCALAPPDATA%\hermes` 下：
+
+- `%TEMP%\hermes-msi-preflight.log`
+- `%TEMP%\hermes-msi-initialize.log`
 
 ## 7. 安装目录
 
@@ -129,14 +136,12 @@ MSI 安装结束前会执行本地初始化：
     rg.exe
     ffmpeg.exe
     ffprobe.exe
-    hermes.cmd
-    hermes.ps1
+    hermes.exe
   python\
   git\
   node\
   hermes-agent\
     venv\                 # 客户端安装时离线生成
-    node_modules\         # 客户端安装时从 MSI 内 npm cache 离线生成
     plugins\enterprise\  # 可选企业插件
   offline\
     uv-cache\

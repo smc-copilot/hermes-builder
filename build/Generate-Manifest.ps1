@@ -21,7 +21,10 @@ $keyFiles = @(
 $hashes = [ordered]@{}
 foreach ($relative in $keyFiles) {
     $full = Join-Path $PayloadDir $relative
-    if (Test-Path $full) { $hashes[$relative] = Get-Sha256 $full }
+    if (-not (Test-Path -LiteralPath $full -PathType Leaf)) {
+        throw "BUILD_PROVENANCE_MISSING: required payload file missing: $relative"
+    }
+    $hashes[$relative] = Get-Sha256 $full
 }
 
 $manifest = [ordered]@{

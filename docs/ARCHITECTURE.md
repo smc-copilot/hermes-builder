@@ -3,24 +3,27 @@
 ```text
 Build host (Windows x64, online)
         |
-        +-- use src/hermes-agent on main + git pull --ff-only
-        |      or clone configured repository/ref when absent
+        +-- release: HEAD must equal the pinned source.ref SHA
+        |      and the work tree plus submodules must be clean
+        |      (-DevelopmentMode may pull main, but that MSI is unreleasable)
         |
-        +-- upstream install.ps1 stages
+        +-- upstream install.ps1 stages on the build host only
         |      uv -> python -> git -> node
         |
-        +-- uv sync --locked -> packaged uv cache
-        |      build-host venv is deleted
-        |
-        +-- upstream node-deps -> hydrated node_modules
+        +-- Build Gate
+        |      delete venv, uv sync --offline --frozen --no-config
+        |      hermes.exe --version
+        |      npm_config_offline node-deps proves the npm cache, then deletes node_modules
+        |      payload\playwright must contain chrome.exe or headless_shell.exe
+        |      proof is written to dist/build-info.json offlineProof
         |
         +-- rg + ffmpeg portable binaries
         |
         +-- enterprise defaults/bootstrap
         v
-    payload/
+    payload/   (no build-host venv, no node_modules)
         |
-        +-- WiX 4 recursive Files harvesting
+        +-- WiX 5 (WixToolset.Sdk/5.0.2) recursive Files harvesting
         v
   single per-user MSI
         |
@@ -28,11 +31,13 @@ Build host (Windows x64, online)
 %LOCALAPPDATA%\hermes
         |
         +-- deferred impersonated initializer
-               uv sync --offline --locked
-               -> final user-path venv
+               Preflight hashes 8 manifest paths
+               uv sync --offline --frozen --no-config in an allowlisted environment
+               venv\Scripts\hermes.exe --version
+               copy to bin\hermes.exe and --version again
 ```
 
-The build host is allowed network access; the endpoint Core MSI initialization path is designed not to require package registry downloads.
+Only the build host may use the network. The endpoint Core path does not call upstream `install.ps1`, does not run `node` / `npm` / `npx`, and does not download package registries. Failure diagnostics stay in `%TEMP%\hermes-msi-preflight.log` and `%TEMP%\hermes-msi-initialize.log`.
 
 ## Why the Python venv is recreated on target
 
@@ -40,10 +45,10 @@ Windows venv launchers and interpreter metadata may contain absolute paths. Ship
 
 ## How source preparation works
 
-The packaging project uses a local-first source scheme. When `src/hermes-agent`
-exists, the builder requires a valid Git work tree on `main`,
-fast-forwards it with `git pull --ff-only`, and copies that snapshot into the
-payload. If it does not exist, the builder clones the configured repository
-into that path and checks out the configured fallback ref. The resulting MSI
-always contains the source snapshot used by the build, while the source
-checkout remains outside the MSI payload's ownership boundary.
+The packaging project uses a local-first source scheme. A release build requires
+`src/hermes-agent` HEAD to equal the pinned `source.ref` SHA and a clean work
+tree, including submodules. It does not `git pull`. `-DevelopmentMode` keeps the
+old `main` + `git pull --ff-only` behavior and marks `build-info.json`
+`unreleasable`. If the checkout is absent, the builder clones the configured
+repository and detaches at `source.ref`. The resulting MSI contains that
+snapshot; the checkout itself stays outside the MSI payload.

@@ -116,9 +116,45 @@ for token in ["--locked", "--offline", "UV_CACHE_DIR", "node-deps", "npm_config_
         fail(f"offline dependency preparation missing token: {token}")
 
 init_text = (ROOT / "scripts/Initialize-Hermes.ps1").read_text(encoding="utf-8")
-for token in ["--offline", "--locked", "Copy-IfMissing", "HERMES_HOME"]:
+for token in ["--offline", "--frozen", "--no-config", "Copy-IfMissing", "HERMES_HOME"]:
     if token not in init_text:
         fail(f"initializer missing token: {token}")
+for forbidden in [
+    "install.ps1",
+    "npm",
+    "npx",
+    "git clone",
+    "Invoke-RestMethod",
+    "Invoke-WebRequest",
+    "Restore-HermesAgentFromBrokenBackup",
+]:
+    if forbidden in init_text:
+        fail(f"initializer must not reference {forbidden}")
+if re.search(r"(?<![A-Za-z])node(?![A-Za-z])", init_text, re.IGNORECASE):
+    fail("initializer must not reference node")
+if re.search(r"(?<![A-Za-z])iwr(?![A-Za-z])", init_text, re.IGNORECASE):
+    fail("initializer must not reference iwr")
+if re.search(r"(?<![A-Za-z])irm(?![A-Za-z])", init_text, re.IGNORECASE):
+    fail("initializer must not reference irm")
+
+manifest_text = (ROOT / "build/Generate-Manifest.ps1").read_text(encoding="utf-8")
+expected_keys = [
+    "bin\\uv.exe",
+    "bin\\rg.exe",
+    "bin\\ffmpeg.exe",
+    "bin\\ffprobe.exe",
+    "node\\node.exe",
+    "hermes-agent\\pyproject.toml",
+    "hermes-agent\\uv.lock",
+    "offline\\bundle-settings.json",
+]
+for key in expected_keys:
+    if key not in manifest_text:
+        fail(f"Generate-Manifest.ps1 missing key file {key}")
+if "BUILD_PROVENANCE_MISSING" not in manifest_text:
+    fail("Generate-Manifest.ps1 must fail the build when a key file is missing")
+if re.search(r"if\s*\(\s*Test-Path\s+\$full\s*\)\s*\{\s*\$hashes", manifest_text):
+    fail("Generate-Manifest.ps1 must not skip missing key files")
 
 # The local source checkout is an accepted build input; generated payload is not.
 for forbidden in [ROOT / "payload"]:

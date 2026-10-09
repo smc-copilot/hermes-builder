@@ -112,5 +112,40 @@ if ($uvCacheItems.Count -eq 0) {
 }
 Write-Log 'uv-cache OK'
 
+$manifestPath = Join-Path $hermesHomeFull 'runtime-manifest.json'
+if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+    throw 'BUNDLE_INTEGRITY_FAILED: runtime-manifest.json is missing'
+}
+$manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+if (-not $manifest.hashes) {
+    throw 'BUNDLE_INTEGRITY_FAILED: runtime-manifest.json has no hashes'
+}
+$hashedFiles = @(
+    'bin\uv.exe',
+    'bin\rg.exe',
+    'bin\ffmpeg.exe',
+    'bin\ffprobe.exe',
+    'node\node.exe',
+    'hermes-agent\pyproject.toml',
+    'hermes-agent\uv.lock',
+    'offline\bundle-settings.json'
+)
+foreach ($rel in $hashedFiles) {
+    $prop = $manifest.hashes.PSObject.Properties[$rel]
+    if (-not $prop -or -not [string]$prop.Value) {
+        throw "BUNDLE_INTEGRITY_FAILED: manifest has no hash for $rel"
+    }
+    $path = Join-Path $hermesHomeFull $rel
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw "BUNDLE_INTEGRITY_FAILED: missing $rel"
+    }
+    $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash.ToLowerInvariant()
+    $expected = ([string]$prop.Value).ToLowerInvariant()
+    if ($actual -ne $expected) {
+        throw "BUNDLE_INTEGRITY_FAILED: hash mismatch for $rel"
+    }
+    Write-Log "HASH OK: $rel"
+}
+
 Write-Log 'Preflight OK'
 exit 0

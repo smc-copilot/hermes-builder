@@ -2,7 +2,8 @@ param(
     [string]$ConfigPath = '',
     [string]$SourceRef = '',
     [switch]$KeepWorkDir,
-    [switch]$SkipMsi
+    [switch]$SkipMsi,
+    [switch]$DevelopmentMode
 )
 
 . (Join-Path $PSScriptRoot 'Common.ps1')
@@ -26,14 +27,33 @@ Reset-Directory $payloadDir
 Reset-Directory $distDir
 
 try {
-    $source = & (Join-Path $PSScriptRoot 'Prepare-Source.ps1') -Config $config -WorkDir $workDir -PayloadDir $payloadDir -SourceRef $SourceRef
+    $sourceArgs = @{
+        Config = $config
+        WorkDir = $workDir
+        PayloadDir = $payloadDir
+        SourceRef = $SourceRef
+    }
+    if ($DevelopmentMode) { $sourceArgs.DevelopmentMode = $true }
+    $source = & (Join-Path $PSScriptRoot 'Prepare-Source.ps1') @sourceArgs
+    if ($source.Unreleasable -and -not $DevelopmentMode) {
+        throw 'SOURCE_REF_MISMATCH: unreleasable source reached a release build'
+    }
     & (Join-Path $PSScriptRoot 'Prepare-Runtime.ps1') -Config $config -PayloadDir $payloadDir -AgentDir $source.AgentDir
-    & (Join-Path $PSScriptRoot 'Prepare-OfflineDependencies.ps1') -Config $config -PayloadDir $payloadDir -AgentDir $source.AgentDir -SourceCommit $source.Commit
+    $offlineResult = & (Join-Path $PSScriptRoot 'Prepare-OfflineDependencies.ps1') -Config $config -PayloadDir $payloadDir -AgentDir $source.AgentDir -SourceCommit $source.Commit
+    $offlineProof = @($offlineResult | Where-Object { $_ -and $_.PSObject.Properties.Name -contains 'steps' }) | Select-Object -Last 1
+    if (-not $offlineProof -or @($offlineProof.steps).Count -lt 4) {
+        throw 'OFFLINE_REBUILD_FAILED: Build Gate did not return offlineProof'
+    }
+    foreach ($step in @($offlineProof.steps)) {
+        if ([int]$step.exitCode -ne 0) {
+            throw "OFFLINE_REBUILD_FAILED: step $($step.name) exited $($step.exitCode)"
+        }
+    }
     & (Join-Path $PSScriptRoot 'Prepare-EnterpriseContent.ps1') -Config $config -ProjectRoot $projectRoot -PayloadDir $payloadDir -AgentDir $source.AgentDir
     & (Join-Path $PSScriptRoot 'Generate-Manifest.ps1') -Config $config -PayloadDir $payloadDir -SourceCommit $source.Commit -SourceRef $source.Ref
 
     if (-not $SkipMsi) {
-        Write-Step 'Build single per-user MSI with WiX Toolset 4'
+        Write-Step 'Build single per-user MSI with WiX Toolset 5'
         $wixProject = Join-Path $projectRoot 'installer\HermesEnterprise.Setup.wixproj'
         $payloadEscaped = $payloadDir
         $version = [string]$config.product.version
@@ -64,6 +84,8 @@ try {
             installScope = 'per-user'
             msi = $finalName
             sha256 = $sha
+            unreleasable = [bool]$source.Unreleasable
+            offlineProof = $offlineProof
             builtAtUtc = [DateTime]::UtcNow.ToString('o')
         }
         Write-JsonFile $buildInfo (Join-Path $distDir 'build-info.json')

@@ -7,6 +7,21 @@ param(
 
 . (Join-Path $PSScriptRoot 'Common.ps1')
 
+$script:OfflineProofSteps = @()
+function Add-OfflineProofStep {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$Command,
+        [Parameter(Mandatory)][int]$ExitCode
+    )
+    $script:OfflineProofSteps += [pscustomobject]@{
+        name = $Name
+        command = [string]$Command
+        exitCode = [int]$ExitCode
+        timestampUtc = [DateTime]::UtcNow.ToString('o')
+    }
+}
+
 function Remove-NodeModulesTrees {
     param([Parameter(Mandatory)][string]$Root)
     # Only delete root node_modules trees (not nested ones under another
@@ -69,12 +84,14 @@ try {
 
     # Prove the packaged uv cache is sufficient without registry/network access.
     if (Test-Path $venv) { Remove-Item $venv -Recurse -Force }
-    $offlineArgs = @('sync', '--offline', '--locked', '--python', $pythonExe.FullName)
+    $offlineArgs = @('sync', '--offline', '--frozen', '--no-config', '--python', $pythonExe.FullName)
     foreach ($extra in $Config.python.extras) { $offlineArgs += @('--extra', [string]$extra) }
     Invoke-Native $uv $offlineArgs $AgentDir
+    Add-OfflineProofStep 'uv-offline-sync' "$uv $($offlineArgs -join ' ')" 0
     $hermesExe = Join-Path $venv 'Scripts\hermes.exe'
-    if (-not (Test-Path $hermesExe)) { throw 'Offline uv verification did not produce venv\Scripts\hermes.exe.' }
+    if (-not (Test-Path $hermesExe)) { throw 'OFFLINE_REBUILD_FAILED: offline uv sync did not produce venv\Scripts\hermes.exe.' }
     Invoke-Native $hermesExe @('--version') $AgentDir
+    Add-OfflineProofStep 'hermes-version' "$hermesExe --version" 0
 } finally {
     if (Test-Path $venv) { Remove-Item $venv -Recurse -Force }
     $env:UV_CACHE_DIR = $oldCache
@@ -113,7 +130,7 @@ try {
 
     # Online hydration: fill npm cache and put Chromium inside the MSI payload.
     & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $installScript `
-        -HermesHome $PayloadDir -InstallDir $AgentDir -Stage 'node-deps' -NonInteractive -SkipSetup
+        -HermesHome $PayloadDir -InstallDir $AgentDir -Stage 'node-deps' -NonInteractive -SkipSetup | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "Hermes online node-deps hydration failed with $LASTEXITCODE" }
 
     # The upstream Windows installer treats npm's workspace return code as
@@ -127,14 +144,15 @@ try {
         if (-not (Test-Path $npxPath)) { throw "payload npx missing: $npxPath" }
         Write-Step 'Explicitly stage Playwright Chromium with payload npx'
         & $npxPath '--yes' 'playwright' 'install' 'chromium' | Out-Host
-        if ($LASTEXITCODE -ne 0) { throw "Playwright Chromium staging failed with $LASTEXITCODE" }
+        if ($LASTEXITCODE -ne 0) { throw "BROWSER_PAYLOAD_MISSING: Playwright Chromium staging failed with $LASTEXITCODE" }
     }
 
     $browserExe = Get-ChildItem $playwright -Recurse -File -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -in @('chrome.exe', 'headless_shell.exe') } | Select-Object -First 1
     if (-not $browserExe) {
-        throw 'Playwright Chromium was not staged under payload\playwright. The MSI would not be browser-offline.'
+        throw 'BROWSER_PAYLOAD_MISSING: Playwright Chromium was not staged under payload\playwright.'
     }
+    Add-OfflineProofStep 'chromium-present' $browserExe.FullName 0
 
     # Never ship build-path-bound node_modules/workspace junctions.
     Remove-NodeModulesTrees $AgentDir
@@ -145,11 +163,12 @@ try {
     $env:npm_config_offline = 'true'
     $env:npm_config_prefer_offline = 'true'
     & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $installScript `
-        -HermesHome $PayloadDir -InstallDir $AgentDir -Stage 'node-deps' -NonInteractive -SkipSetup
-    if ($LASTEXITCODE -ne 0) { throw "Hermes node-deps OFFLINE verification failed with $LASTEXITCODE" }
+        -HermesHome $PayloadDir -InstallDir $AgentDir -Stage 'node-deps' -NonInteractive -SkipSetup | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw "NPM_CACHE_INSUFFICIENT: Hermes node-deps OFFLINE verification failed with $LASTEXITCODE" }
+    Add-OfflineProofStep 'node-deps-offline' 'install.ps1 -Stage node-deps (npm_config_offline=true)' 0
 
     $nodeModuleDirs = @(Get-ChildItem -LiteralPath $AgentDir -Directory -Recurse -Filter 'node_modules' -ErrorAction SilentlyContinue)
-    if ($nodeModuleDirs.Count -eq 0) { throw 'Offline node-deps verification produced no node_modules tree.' }
+    if ($nodeModuleDirs.Count -eq 0) { throw 'NPM_CACHE_INSUFFICIENT: offline node-deps verification produced no node_modules tree.' }
 
     # Endpoint recreates node_modules at its real per-user path from npm-cache.
     Remove-NodeModulesTrees $AgentDir
@@ -178,3 +197,8 @@ $settings = [ordered]@{
     playwrightBrowsersPath = 'playwright'
 }
 Write-JsonFile $settings (Join-Path $offline 'bundle-settings.json')
+
+Write-Output ([pscustomobject]@{
+    schemaVersion = 1
+    steps = @($script:OfflineProofSteps)
+})

@@ -32,15 +32,36 @@ jobs:
         shell: pwsh
         run: python -B tests/test_launcher.py
 
+      - name: Bundle integrity fixtures
+        shell: pwsh
+        run: .\tests\Test-BundleIntegrity.ps1
+
+      - name: Python offline install fixtures
+        shell: pwsh
+        run: .\tests\Test-PythonOfflineInstall.ps1
+
       - name: Build MSI
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: .\build\Build.ps1 -SourceRef '${{ inputs.source_ref }}'
 
+      - name: Build-gate proof
+        shell: pwsh
+        run: .\tests\Test-BuildOfflineProof.ps1
+
+      - name: uv environment isolation
+        shell: pwsh
+        run: .\tests\Test-UvEnvIsolation.ps1
+
+      # A real per-user msiexec of A-PY-001 and A-OBS-003 is not this job.
+      # Hook that gate to a self-hosted Windows runner when one is available.
+
       - name: Upload MSI artifact
         uses: actions/upload-artifact@v4
         with:
           name: copilot-hermes-enterprise-msi
-          path: dist/*
+          path: |
+            dist/*
+            evidence/*
           if-no-files-found: error
