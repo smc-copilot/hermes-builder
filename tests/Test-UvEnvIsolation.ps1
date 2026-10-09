@@ -43,9 +43,6 @@ function Invoke-Sync {
         $env:VIRTUAL_ENV = Join-Path $env:TEMP 'hermes-foreign-venv'
         $syncArgs = @('sync', '--offline', '--locked', '--python', $python.FullName, '--project', $layout.Agent, '--directory', $layout.Agent)
         if ($Protected) {
-            $toml = Join-Path $env:TEMP 'hermes-malicious-uv.toml'
-            "link-mode = `"copy`"`r`n" | Set-Content -LiteralPath $toml -Encoding ASCII
-            $env:UV_CONFIG_FILE = $toml
             foreach ($name in @([Environment]::GetEnvironmentVariables().Keys)) {
                 if ($name -like 'UV_*' -or $name -eq 'VIRTUAL_ENV') {
                     Remove-Item "Env:$name" -ErrorAction SilentlyContinue
@@ -54,9 +51,11 @@ function Invoke-Sync {
             $env:UV_CACHE_DIR = $layout.Cache
             $env:UV_PROJECT_ENVIRONMENT = $Venv
             $env:UV_PYTHON_INSTALL_DIR = $layout.PythonRoot
+            $env:UV_NO_PROGRESS = '1'
             $env:NO_COLOR = '1'
-            $syncArgs = @('sync', '--offline', '--frozen', '--link-mode', 'copy', '--no-config', '--python', $python.FullName, '--project', $layout.Agent, '--directory', $layout.Agent)
-            if ($syncArgs -notcontains '--no-config') { throw 'A-ENV-001 protected argv missing --no-config' }
+            $syncArgs = @('sync', '--offline', '--frozen', '--link-mode', 'copy', '--no-progress', '--python', $python.FullName, '--project', $layout.Agent, '--directory', $layout.Agent)
+            if ($syncArgs -notcontains '--frozen') { throw 'A-ENV-001 protected argv missing --frozen' }
+            if ($syncArgs -contains '--no-config') { throw 'A-ENV-001 protected argv must not use --no-config' }
         }
         Write-Host ("uv argv: {0} {1}" -f $layout.Uv, ($syncArgs -join ' '))
         & $layout.Uv @syncArgs

@@ -1,9 +1,15 @@
 # SMC Copilot Hermes default config
 # This file is copied only on first install. Existing user config is preserved.
 
-# model:
-#   provider: custom
-#   name: your-model
+model:
+  default: "deepseek-v4-flash"
+  provider: "nodeskclaw"
+providers:
+  nodeskclaw:
+    name: "SMC Enterprise Model"
+    base_url: "http://192.168.102.247:3900/v1"
+    key_env: "NODESKCLAW_RUNTIME_MODEL_API_KEY"
+    api_mode: "chat_completions"
 
 
 mcp_servers:

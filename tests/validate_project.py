@@ -116,9 +116,11 @@ for token in ["--locked", "--offline", "UV_CACHE_DIR", "node-deps", "npm_config_
         fail(f"offline dependency preparation missing token: {token}")
 
 init_text = (ROOT / "scripts/Initialize-Hermes.ps1").read_text(encoding="utf-8")
-for token in ["--offline", "--frozen", "--no-config", "Copy-IfMissing", "HERMES_HOME"]:
+for token in ["--offline", "--frozen", "--no-progress", "import yaml, openai", "Copy-IfMissing", "HERMES_HOME", "Remove-Item -LiteralPath $venv"]:
     if token not in init_text:
         fail(f"initializer missing token: {token}")
+if "--no-config" in init_text:
+    fail("initializer must not pass the uv no-config flag; it can leave a hollow venv after a path rebuild")
 for forbidden in [
     "install.ps1",
     "npm",

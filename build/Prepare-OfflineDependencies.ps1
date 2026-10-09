@@ -78,13 +78,22 @@ try {
     $env:UV_PYTHON_INSTALL_DIR = Join-Path $PayloadDir 'python'
     $env:HERMES_HOME = $PayloadDir
 
+    # Optional build-host seed. files.pythonhosted.org can fail TLS while the
+    # lockfile is unchanged; a previous cache for this same uv.lock avoids the CDN.
+    $cacheSeed = $env:HERMES_UV_CACHE_SEED
+    if ($cacheSeed -and (Test-Path -LiteralPath $cacheSeed)) {
+        Write-Step "Seed uv cache from $cacheSeed"
+        & robocopy.exe $cacheSeed $uvCache /E /NFL /NDL /NJH /NJS /NC /NS /NP | Out-Host
+        if ($LASTEXITCODE -ge 8) { throw "uv cache seed failed with robocopy exit $LASTEXITCODE" }
+    }
+
     $syncArgs = @('sync', '--locked', '--python', $pythonExe.FullName)
     foreach ($extra in $Config.python.extras) { $syncArgs += @('--extra', [string]$extra) }
     Invoke-Native $uv $syncArgs $AgentDir
 
     # Prove the packaged uv cache is sufficient without registry/network access.
     if (Test-Path $venv) { Remove-Item $venv -Recurse -Force }
-    $offlineArgs = @('sync', '--offline', '--frozen', '--no-config', '--python', $pythonExe.FullName)
+    $offlineArgs = @('sync', '--offline', '--frozen', '--no-progress', '--python', $pythonExe.FullName)
     foreach ($extra in $Config.python.extras) { $offlineArgs += @('--extra', [string]$extra) }
     Invoke-Native $uv $offlineArgs $AgentDir
     Add-OfflineProofStep 'uv-offline-sync' "$uv $($offlineArgs -join ' ')" 0
@@ -92,6 +101,9 @@ try {
     if (-not (Test-Path $hermesExe)) { throw 'OFFLINE_REBUILD_FAILED: offline uv sync did not produce venv\Scripts\hermes.exe.' }
     Invoke-Native $hermesExe @('--version') $AgentDir
     Add-OfflineProofStep 'hermes-version' "$hermesExe --version" 0
+    $venvPython = Join-Path $venv 'Scripts\python.exe'
+    Invoke-Native $venvPython @('-c', 'import yaml, openai') $AgentDir
+    Add-OfflineProofStep 'core-imports' "$venvPython -c import yaml, openai" 0
 } finally {
     if (Test-Path $venv) { Remove-Item $venv -Recurse -Force }
     $env:UV_CACHE_DIR = $oldCache

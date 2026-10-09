@@ -11,7 +11,7 @@ Build host (Windows x64, online)
         |      uv -> python -> git -> node
         |
         +-- Build Gate
-        |      delete venv, uv sync --offline --frozen --no-config
+        |      delete venv, uv sync --offline --frozen --no-progress
         |      hermes.exe --version
         |      npm_config_offline node-deps proves the npm cache, then deletes node_modules
         |      payload\playwright must contain chrome.exe or headless_shell.exe
@@ -32,7 +32,8 @@ Build host (Windows x64, online)
         |
         +-- deferred impersonated initializer
                Preflight hashes 8 manifest paths
-               uv sync --offline --frozen --no-config in an allowlisted environment
+               uv sync --offline --frozen --no-progress in an allowlisted environment
+               then import yaml, openai before copying bin\hermes.exe
                venv\Scripts\hermes.exe --version
                copy to bin\hermes.exe and --version again
 ```

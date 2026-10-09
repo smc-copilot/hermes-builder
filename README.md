@@ -34,7 +34,7 @@
 - 企业默认配置模板
 - Enterprise Skills / Plugins 注入点
 
-Python venv **不会从构建机直接复制到用户电脑**。原因是 Windows venv 中存在与构建路径绑定的 launcher / interpreter path。构建机在打包前会删掉 venv，用 `uv sync --offline --frozen --no-config` 重建一次并跑 `hermes.exe --version`，再把这个 venv 删掉。`--frozen` 是因为 uv 0.12 不能把 `--locked` 和 `--no-config` 放在一起，而 `--no-config` 会丢掉 `tool.uv` 的 `exclude-newer`，`--locked` 因此会重新解析并在离线 cache 上失败。MSI 安装后，终端在最终 `%LOCALAPPDATA%\hermes\hermes-agent\venv` 用同一组参数再建一次，环境变量只保留 allowlist（清掉继承的 `UV_*` 和 `VIRTUAL_ENV`）。
+Python venv **不会从构建机直接复制到用户电脑**。原因是 Windows venv 中存在与构建路径绑定的 launcher / interpreter path。构建机在打包前会删掉 venv，用 `uv sync --offline --frozen --no-progress` 重建一次，跑 `hermes.exe --version` 并 `import yaml, openai`，再把这个 venv 删掉。`--frozen` 按 `uv.lock` 安装，避免重新解析。MSI 安装后，终端在最终 `%LOCALAPPDATA%\hermes\hermes-agent\venv` 用同一组参数再建一次，环境变量只保留 allowlist（清掉继承的 `UV_*` 和 `VIRTUAL_ENV`）。sync 之后必须能 `import yaml, openai`，否则安装失败。
 
 Node 依赖只在构建机处理：先在线安装以填充 npm cache，并把 Playwright Chromium 固定下载到 payload，再在 `npm_config_offline=true` 下重建 `node_modules` 证明 cache 够用，然后删除 `node_modules`。终端不重建 `node_modules`。`payload\playwright` 里没有 `chrome.exe` 或 `headless_shell.exe` 时构建失败。这三步的命令、退出码和 UTC 时间写入 `dist/build-info.json` 的 `offlineProof`。任一步失败则构建退出非 0，不产出 MSI。
 
@@ -116,7 +116,7 @@ MSI 安装结束前会执行本地初始化：
 3. 使用 MSI 内的 uv + Python + uv cache
 4. Preflight 核对 `runtime-manifest.json` 里 8 个路径的 SHA256，不一致则 `BUNDLE_INTEGRITY_FAILED`，不会启动 uv
 5. 在真实用户路径创建 `hermes-agent\venv`
-6. `uv sync --offline --frozen --no-config`（allowlist 环境，不调用上游 `install.ps1`，不跑 node/npm）
+6. `uv sync --offline --frozen --no-progress`（allowlist 环境，不调用上游 `install.ps1`，不跑 node/npm），然后 `import yaml, openai`
 7. 校验 `venv\Scripts\hermes.exe --version`，复制到 `bin\hermes.exe` 后再校验一次
 8. 首次 seed `.env` / `config.yaml` / `SOUL.md`，已存在时绝不覆盖
 9. 同步 `enterprise/skills` 到 `%LOCALAPPDATA%\hermes\skills`，目录名转为小写连字符，保留分类路径

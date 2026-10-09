@@ -115,16 +115,17 @@ $pyproject does not exist. Uninstall SMC Copilot Hermes and reinstall the same M
     }
 
     if ($needsSync) {
-        Write-InstallLog 'Creating/updating Python venv from packaged uv cache (offline, locked, no-config)...'
-        # --no-config ignores user uv.toml. uv 0.12 also rejects --locked with
-        # --no-config, and --locked --no-config re-resolves because tool.uv
-        # exclude-newer is dropped. --frozen installs uv.lock without that resolve.
+        Write-InstallLog 'Creating/updating Python venv from packaged uv cache (offline, frozen)...'
+        # Keep project metadata visible to uv. Disabling config discovery makes a
+        # per-user path rebuild exit 0 after "Prepared 1 package" with no
+        # yaml/openai. A replacement UV_CONFIG_FILE drops tool.uv exclude-newer
+        # so --locked re-resolves offline and fails. --frozen installs uv.lock.
         $syncArgs = @(
             'sync',
             '--offline',
             '--frozen',
             '--link-mode', 'copy',
-            '--no-config',
+            '--no-progress',
             '--python', $pythonExe,
             '--project', $HermesAgentHome,
             '--directory', $HermesAgentHome
@@ -143,19 +144,23 @@ $pyproject does not exist. Uninstall SMC Copilot Hermes and reinstall the same M
             }
         }
         $uvExit = 1
+        $uvStdout = Join-Path $env:TEMP 'hermes-msi-uv-sync.out.log'
+        $uvStderr = Join-Path $env:TEMP 'hermes-msi-uv-sync.err.log'
+        if (Test-Path -LiteralPath $venv) { Remove-Item -LiteralPath $venv -Recurse -Force }
         Push-Location -LiteralPath $HermesAgentHome
         try {
             $env:UV_CACHE_DIR = $uvCache
             $env:UV_PROJECT_ENVIRONMENT = $venv
             $env:UV_PYTHON_INSTALL_DIR = Join-Path $HermesHome 'python'
+            $env:UV_NO_PROGRESS = '1'
             $env:HERMES_HOME = $HermesHome
             $env:NO_COLOR = '1'
             Write-InstallLog "CurrentDirectory=$(Get-Location)"
             Write-InstallLog "uv argv: $UvPath $($syncArgs -join ' ')"
             $uvSnap = @(Get-ChildItem Env:UV_* -ErrorAction SilentlyContinue | ForEach-Object { "$($_.Name)=$($_.Value)" })
             Write-InstallLog ("UV_* after allowlist: {0}" -f ($uvSnap -join '; '))
-            & $UvPath @syncArgs
-            $uvExit = $LASTEXITCODE
+            $proc = Start-Process -FilePath $UvPath -ArgumentList $syncArgs -WorkingDirectory $HermesAgentHome -Wait -PassThru -WindowStyle Hidden -RedirectStandardOutput $uvStdout -RedirectStandardError $uvStderr
+            $uvExit = $proc.ExitCode
         } finally {
             Pop-Location
             foreach ($name in @([Environment]::GetEnvironmentVariables().Keys)) {
@@ -165,6 +170,14 @@ $pyproject does not exist. Uninstall SMC Copilot Hermes and reinstall the same M
             }
             foreach ($name in @($savedUv.Keys)) {
                 Set-Item -Path "Env:$name" -Value $savedUv[$name]
+            }
+        }
+        foreach ($f in @($uvStdout, $uvStderr)) {
+            if (Test-Path -LiteralPath $f) {
+                $chunk = [string](Get-Content -LiteralPath $f -Raw -ErrorAction SilentlyContinue)
+                foreach ($line in @($chunk -split "`r?`n")) {
+                    if ($line) { Write-InstallLog $line }
+                }
             }
         }
         Write-InstallLog "uv sync exit=$uvExit"
@@ -193,6 +206,17 @@ $pyproject does not exist. Uninstall SMC Copilot Hermes and reinstall the same M
         if ($code -ne 0 -or $first -notmatch $pattern) {
             Fail-Install 'HERMES_CLI_VERIFY_FAILED' "hermes --version failed for $Exe (exit=$code, first='$first')"
         }
+    }
+
+    $venvPython = Join-Path $venv 'Scripts\python.exe'
+    if (-not (Test-Path -LiteralPath $venvPython -PathType Leaf)) {
+        Fail-Install 'HERMES_CLI_VERIFY_FAILED' "venv python missing after sync: $venvPython"
+    }
+    $depOut = @(& $venvPython -c "import yaml, openai; print('DEPS_OK')" 2>&1)
+    $depCode = $LASTEXITCODE
+    Write-InstallLog "venv python import yaml,openai exit=$depCode out=$($depOut -join ' | ')"
+    if ($depCode -ne 0 -or ($depOut -join ' ') -notmatch 'DEPS_OK') {
+        Fail-Install 'HERMES_CLI_VERIFY_FAILED' "venv is missing PyYAML or OpenAI after uv sync. $(($depOut | Out-String).Trim())"
     }
 
     Assert-HermesCli $venvHermes

@@ -9,7 +9,7 @@ $info = Get-Content -LiteralPath $infoPath -Raw | ConvertFrom-Json
 if ($info.unreleasable) { throw 'A-BUILD-001 release build-info is marked unreleasable' }
 if (-not $info.offlineProof -or -not $info.offlineProof.steps) { throw 'A-BUILD-001 offlineProof missing' }
 $steps = @($info.offlineProof.steps)
-$required = @('uv-offline-sync', 'hermes-version', 'node-deps-offline', 'chromium-present')
+$required = @('uv-offline-sync', 'hermes-version', 'core-imports', 'node-deps-offline', 'chromium-present')
 foreach ($name in $required) {
     $step = $steps | Where-Object { $_.name -eq $name } | Select-Object -First 1
     if (-not $step) { throw "A-BUILD-001 missing proof step $name" }

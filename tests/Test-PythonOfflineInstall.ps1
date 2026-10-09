@@ -19,6 +19,7 @@ function New-CompiledExe {
 
 $toolDir = Join-Path $env:TEMP ('hermes-stubs-' + [guid]::NewGuid().ToString('n'))
 $hermesStub = Join-Path $toolDir 'hermes-stub.exe'
+$pythonStub = Join-Path $toolDir 'python-stub.exe'
 $uvStub = Join-Path $toolDir 'uv-stub.exe'
 New-CompiledExe $hermesStub @'
 using System;
@@ -34,17 +35,36 @@ public class HermesStub {
   }
 }
 '@
+New-CompiledExe $pythonStub @'
+using System;
+public class PythonStub {
+  public static void Main() {
+    if (Environment.GetEnvironmentVariable("HERMES_STUB_FAIL_IMPORT") == "1") {
+      Console.Error.WriteLine("ModuleNotFoundError: No module named 'yaml'");
+      Environment.Exit(1);
+    }
+    Console.WriteLine("DEPS_OK");
+  }
+}
+'@
 New-CompiledExe $uvStub @'
 using System;
 using System.IO;
 public class UvStub {
   public static void Main() {
-    string src = Environment.GetEnvironmentVariable("HERMES_STUB_SOURCE");
+    Console.WriteLine("Installed 67 packages");
     string env = Environment.GetEnvironmentVariable("UV_PROJECT_ENVIRONMENT");
-    if (string.IsNullOrEmpty(src) || string.IsNullOrEmpty(env)) return;
+    if (string.IsNullOrEmpty(env)) return;
     string destDir = Path.Combine(env, "Scripts");
     Directory.CreateDirectory(destDir);
-    File.Copy(src, Path.Combine(destDir, "hermes.exe"), true);
+    string py = Environment.GetEnvironmentVariable("HERMES_STUB_PYTHON");
+    if (!string.IsNullOrEmpty(py) && File.Exists(py)) {
+      File.Copy(py, Path.Combine(destDir, "python.exe"), true);
+    }
+    string src = Environment.GetEnvironmentVariable("HERMES_STUB_SOURCE");
+    if (!string.IsNullOrEmpty(src) && File.Exists(src)) {
+      File.Copy(src, Path.Combine(destDir, "hermes.exe"), true);
+    }
   }
 }
 '@
@@ -98,7 +118,9 @@ function Assert-LogOutsideInstallRoot {
 
 try {
     $env:HERMES_STUB_SOURCE = ''
+    $env:HERMES_STUB_PYTHON = $pythonStub
     $env:HERMES_STUB_DELETE_SELF = ''
+    $env:HERMES_STUB_FAIL_IMPORT = ''
 
     $missing = Join-Path $env:TEMP ('hermes-missing-' + [guid]::NewGuid().ToString('n'))
     New-Home $missing
@@ -132,11 +154,21 @@ try {
     if ($r.Exit -eq 0 -or $r.Output -notmatch 'HERMES_CLI_MISSING_POST_SYNC') { throw "A-PY-002 output: $($r.Output)" }
     Assert-LogOutsideInstallRoot $r 'HERMES_CLI_MISSING_POST_SYNC'
 
+    $noDeps = Join-Path $env:TEMP ('hermes-nodeps-' + [guid]::NewGuid().ToString('n'))
+    New-Home $noDeps -WithPyproject
+    $env:HERMES_STUB_SOURCE = $hermesStub
+    $env:HERMES_STUB_FAIL_IMPORT = '1'
+    $r = Invoke-Init $noDeps
+    $env:HERMES_STUB_FAIL_IMPORT = ''
+    if ($r.Exit -eq 0 -or $r.Output -notmatch 'UV_SYNC_FAILED') { throw "hollow venv accepted: $($r.Output)" }
+    Assert-LogOutsideInstallRoot $r 'UV_SYNC_FAILED'
+
     $vanish = Join-Path $env:TEMP ('hermes-vanish-' + [guid]::NewGuid().ToString('n'))
     New-Home $vanish -WithPyproject
     $scripts = Join-Path $vanish 'hermes-agent\venv\Scripts'
     New-Item -ItemType Directory -Path $scripts -Force | Out-Null
     Copy-Item $hermesStub (Join-Path $scripts 'hermes.exe') -Force
+    Copy-Item $pythonStub (Join-Path $scripts 'python.exe') -Force
     "relocatable = false" | Set-Content (Join-Path $vanish 'hermes-agent\venv\pyvenv.cfg') -Encoding ASCII
     New-Item -ItemType Directory -Path (Join-Path $vanish 'state') -Force | Out-Null
     @{ schemaVersion = 1; sourceCommit = '041b6985a00d01b54f830c1607dd370007a306bf' } | ConvertTo-Json |
@@ -178,5 +210,7 @@ try {
     [Environment]::SetEnvironmentVariable('HERMES_HOME', $savedUserHome, 'User')
     [Environment]::SetEnvironmentVariable('Path', $savedUserPath, 'User')
     Remove-Item Env:HERMES_STUB_SOURCE -ErrorAction SilentlyContinue
+    Remove-Item Env:HERMES_STUB_PYTHON -ErrorAction SilentlyContinue
+    Remove-Item Env:HERMES_STUB_FAIL_IMPORT -ErrorAction SilentlyContinue
     Remove-Item Env:HERMES_STUB_DELETE_SELF -ErrorAction SilentlyContinue
 }
